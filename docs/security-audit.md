@@ -1,14 +1,13 @@
-# Security Audit: Hidden Information (P34)
+# Security Audit: Hidden Information
 
-P34's own instructions: write a checklist of every piece of hidden
+write a checklist of every piece of hidden
 information, verify server code paths never leak it, use a traffic
 inspector across multiple clients to confirm no leakage, and add a
 regression check so a leak can't silently reappear. This document is that
 checklist. The "traffic inspector" is
 `server/tests/integration/teamsRolesAndChat.test.ts` - an automated,
 repeatable equivalent of manually running browser dev tools against
-several open tabs, and the thing that actually *runs* on every future
-change rather than being a one-time manual pass.
+several open tabs, and the thing that actually *runs* as a repeatable regression check rather than a one-time manual pass.
 
 ## Method
 
@@ -83,17 +82,17 @@ doesn't, (3) the specific test that would fail if it started to.
   response that would let either party infer the other's role from the
   rejection itself).
 
-### 7. Task instability / contribution history (carried over from P22)
+### 7. Task instability / contribution history
 
 - **Where it lives:** `TaskRuntimeState.instability` and
   `.contributionLog` inside `Match`.
 - **Why it can't leak:** `TaskStateDTO` (the public shape) only exposes
   `progress` and `completed` - `instability` and the log aren't fields on
-  it at all, so there's no accidental-inclusion risk from a future field
+  it at all, so there's no accidental-inclusion risk from a field
   rename or spread mistake touching the wrong object.
-- **Regression check:** covered under Stage D's own tests
+- **Regression check:** covered under the task contribution tests
   (`server/tests/unit/taskContribution.test.ts`); re-verified here only in
-  the sense that nothing in Stage E/F touches this path.
+  the sense that the chat and role systems do not touch this path.
 
 ## What this audit does not cover
 

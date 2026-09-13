@@ -1,303 +1,229 @@
 # Architecture
 
-This describes the codebase as it exists after Foundation (P1-P3) and
-Stages A-F (P4-P34), plus a subsequent visual overhaul: a real 3D island
-scene and Island's real 5-player minimum. It covers what's actually built -
-not where the roadmap is headed. See `Last-Stand-Development-Roadmap.pdf`
-for the full plan.
+This document describes the current Last Stand codebase: its package layout,
+authoritative server model, shared protocol, game systems, 3D client, testing
+strategy, and current implementation boundaries.
 
 ## Monorepo layout
 
-```
+```text
 /client   - React + TypeScript + Vite. Everything the player's browser runs.
 /server   - Node + TypeScript. The authoritative game server.
-/shared   - Types, constants, and pure game-logic data (e.g. the island map,
-            elements, abilities, tasks, teams) imported by both client and
-            server, so they can never disagree about a message shape or the
-            shape of the world.
-/games    - Reserved for Stage J/K (Color Code, Hidden Objective). Empty
-            until those stages exist - see PART 2 of the roadmap.
-/docs     - This file, plus topic-specific docs:
-              island-map.md            - Stage B's zone graph
-              elements-and-abilities.md - Stage C
-              task-system.md            - Stage D
-              chat-system.md            - Stage E
-              teams-and-roles.md        - Stage F (teams, roles, the key)
-              security-audit.md         - P34's explicit hidden-info audit
-              game-world-3d.md          - the React Three Fiber 3D scene
+/shared   - Types, constants, and pure game-logic data imported by both client
+            and server so they cannot disagree about message shapes or world data.
+/games    - Reserved for standalone games.
+/docs     - Architecture and system documentation.
 ```
 
-`pnpm-workspace.yaml` wires these together as workspace packages; `pnpm dev`
-runs client and server concurrently. There is no root-level `/tests`
-directory - `shared` and `server` each keep their own `tests/` folder
-alongside the code they test, which scales better than one shared folder as
-more packages gain their own test suites.
+`pnpm-workspace.yaml` wires the packages together; `pnpm dev` runs client and
+server concurrently. There is no root-level `/tests` directory: `shared` and
+`server` each keep their own tests beside the code they cover.
 
 ## Client / server / shared split
 
-- **shared** has zero runtime dependencies and no I/O. It only exports types,
-  constants, and pure functions (e.g. `isZoneAdjacent`, `canStartRoom`,
-  `sanitizeNickname`). Both client and server import it as
-  `@last-stand/shared`. If a rule needs to be checked identically on both
-  sides (nickname validity, movement adjacency, ready-to-start logic), it
-  lives here once rather than being re-implemented twice.
-- **server** is the only source of truth for anything that matters: room
-  membership, ready state, roles (later), positions, cooldowns. The client
-  never asserts its own authoritative state - it sends *requests*
-  (`room:join`, `match:move`, ...) and renders whatever the server broadcasts
-  back.
-- **client** is a thin renderer over server-pushed state, plus a small
-  amount of local-only UI state (which screen is open, in-progress form
-  input). It never computes gameplay outcomes itself.
+- **shared** has zero runtime dependencies and no I/O. It exports types,
+  constants, validation helpers, and shared game data such as the island map,
+  elements, abilities, tasks, and teams. Rules that must agree on both sides
+  live here once rather than being re-implemented twice.
+- **server** is the source of truth for authoritative state: room membership,
+  ready state, teams, roles, positions, cooldowns, task progress, chat
+  permissions, and hidden information. The client sends requests and renders
+  server-provided results.
+- **client** is primarily a renderer over server-pushed state, with local UI
+  state for screens, forms, timers, mute settings, and other presentation
+  concerns. It does not decide gameplay outcomes.
 
 ## The WebSocket message envelope
 
-Every message, in both directions, is:
+Every message, in both directions, uses:
 
 ```ts
 interface MessageEnvelope<TPayload = unknown> {
-  type: MessageType;   // e.g. "room:join", "match:snapshot"
+  type: MessageType;
   payload: TPayload;
   timestamp: number;
 }
 ```
 
-This shape is unchanged since P3. What's grown since then:
+`shared/src/messages/types.ts` contains the complete `MessageType` union.
+`shared/src/messages/payloads.ts` maps each message type to its payload
+interface and provides typed helpers for call sites.
 
-- `shared/src/messages/types.ts` - the full `MessageType` string union. Every
-  message kind the protocol supports is listed here, and nowhere else should
-  a message-type string be hand-typed.
-- `shared/src/messages/payloads.ts` - `MessagePayloadMap`, mapping each
-  `MessageType` to its concrete payload interface, plus a `TypedMessage<T>`
-  helper for call sites that want the compiler to check a specific message's
-  shape.
+Connections use plain JSON over `ws`. A connection has no active session until
+it sends `session:hello`; subsequent messages are routed through
+`server/src/routing/messageRouter.ts` to their handlers.
 
-On the wire, connections are plain JSON over `ws`. A connection has no
-session until it sends `session:hello`; everything else is routed through
-`server/src/routing/messageRouter.ts` to a per-message-type handler in
-`server/src/routing/handlers/`.
+## Session model
 
-## Session model (P7)
+A **session** (`playerId` + `sessionToken`) is independent of a single socket.
+`SessionManager` (`server/src/session/`) owns session lifecycle:
 
-A **session** (`playerId` + `sessionToken`) is independent of any single
-socket. `SessionManager` (`server/src/session/`) owns this:
+1. A new socket must begin with `session:hello`. A valid token resumes the
+   existing session; otherwise a nickname is required to create one.
+2. A disconnect marks the session as disconnected and starts the configured
+   grace period. Reconnection within that window restores the session.
+3. When a session expires, `RoomManager` removes it from open rooms. A player
+   already inside a match remains part of that match; there is no mid-match
+   leave operation.
+4. On resume, the server re-sends the player's current room state and chat
+   history, or the latest match state, so the client can immediately restore
+   its view.
 
-1. First message on a new socket must be `session:hello`. With a valid
-   `sessionToken`, the existing session is resumed (`outcome: "resumed"`)
-   and re-attached to the new socket - a page refresh reconnects the same
-   player rather than creating a new one. With no valid token, a `nickname`
-   is required to create a fresh session (`outcome: "created"`).
-2. On disconnect, a session isn't deleted immediately: it's marked
-   `connected: false` and a `DISCONNECT_TIMEOUT_MS` grace period starts. A
-   reconnect within that window clears the timer and restores state. If the
-   window elapses, the session is expired (`SessionManager` emits
-   `"expired"`), which `RoomManager` reacts to by removing that player from
-   any open room. A match never removes a permanently-disconnected player -
-   there's no "leave mid-match" concept yet.
-3. On resume, the server proactively resends whatever the player was last
-   looking at (`server/src/routing/rehydrate.ts`) - the current room state
-   and chat history, or the latest match snapshot - so the client doesn't
-   have to wait for the next natural broadcast.
+The client stores `sessionToken` and `nickname` in `localStorage` and replays
+them on `session:hello`.
 
-The client mirrors this with `localStorage` (`client/src/net/storage.ts`):
-`sessionToken` and `nickname` are stored there and replayed on every
-`session:hello`, including the very first connection of a session.
+## Room / lobby model
 
-## Room / lobby model (P5, P6)
+`Room` and `RoomManager` live in `server/src/rooms/`. A Room represents players
+waiting to play and has its own lifecycle (`open` -> `starting` -> `in_game`).
+The server derives membership, host status, and ready state from the active
+session rather than trusting client-supplied authoritative values.
 
-`Room` (data) and `RoomManager` (rules) live in `server/src/rooms/`. A Room
-is deliberately *not* the same object as a Match (below) - it's "people
-waiting to play," with its own status (`open` -> `starting` -> `in_game`).
-`RoomManager` never trusts a client-sent value for anything authoritative
-(ready flags, host status, membership); every mutation is derived from the
-session making the request.
+Lobby chat (`room:chat:send`, `room:chat:message`, `room:chat:history`) is
+intentionally minimal: it has capped history and is scoped to the pre-game
+room. Match communication is handled separately by `MatchChat`.
 
-Lobby chat (`room:chat:send` / `room:chat:message` / `room:chat:history`) is
-intentionally minimal - no moderation, no rate limiting, capped history.
-Stage E (P25-P28) replaces this with the real communication system.
+## Match / game loop
 
-## Match / game loop (P8)
+`Match` (`server/src/match/Match.ts`) is the authoritative tick-driven state
+machine created from a Room's player list. Its status machine is
+`starting -> in_progress -> ended`. A match currently reaches `ended` when all
+players have disconnected.
 
-`Match` (`server/src/match/Match.ts`) is the authoritative, tick-driven
-state machine a Room starts. Its status machine is
-`starting -> in_progress -> ended`; `ended` is currently only reached if
-every player in the match disconnects (real win conditions are Stage I,
-much later in the roadmap). `MatchManager` creates a `Match` from a Room's
-player list, wires its tick output to per-player broadcasts, and routes
-`match:move` requests to the right match.
+`MatchManager` creates matches, wires tick output to per-player broadcasts,
+and routes match requests to the correct match. The tick loop runs every
+`MATCH_TICK_INTERVAL_MS` (150ms) and broadcasts a full `MatchSnapshotDTO`.
+This keeps the state model straightforward and gives the client a complete
+view of the current match on every tick.
 
-The tick loop runs every `MATCH_TICK_INTERVAL_MS` (150ms) and broadcasts a
-full `MatchSnapshotDTO` to every player in the match on every tick. This is
-simple and correct at the player counts this phase is built and tested for;
-diffing/delta-compression is a reasonable future optimization once Island's
-real player counts (20-50) are being tested against, but doing it now would
-be optimizing before there's a measured need.
+## World & movement
 
-## World & movement (P10-P14)
+The island is a **graph of zones**, not free 2D space. `Match` places every
+player in the start zone, and `match:move` requests are validated against
+`server/src/match/movement.ts` using the shared map.
 
-The island is a **graph of zones**, not free 2D space - see
-`docs/island-map.md` for the map itself and why. `Match` places every player
-in the start zone, and `match:move` requests are validated against that
-graph (`server/src/match/movement.ts`, unit-tested in isolation from any
-socket/match machinery). A successful move updates the authoritative zone
-immediately and starts a cooldown (`MOVEMENT_COOLDOWN_MS`); the `movement`
-field on a player's snapshot record is purely a hint for the client to
-animate a transition, not a distinct server-side state. As of P17/P18, a
-zone can also be dynamically blocked by an ability - `checkMove` was
-extended to reject into a blocked zone rather than gaining a parallel check
-elsewhere.
+A successful move updates the authoritative zone and starts
+`MOVEMENT_COOLDOWN_MS`. The `movement` field in the snapshot is a client-facing
+animation hint containing the source zone, destination zone, start time, and
+duration. A zone can also be dynamically blocked by an ability, and movement
+into a blocked zone is rejected.
 
 ## The 3D island scene
 
-The flat SVG node-graph map (originally P11) has been replaced by a real
-3D scene built with React Three Fiber - full design notes in
-`docs/game-world-3d.md`, including why Unity wasn't an option in this
-environment, how each element got a visually distinct character, and how
-this was actually verified (headless Chromium screenshots of a live
-5-player match, not just a successful build). The underlying game logic is
-completely unchanged: the 3D scene visualizes the exact same
-`match:snapshot`/`ability:used` data the old 2D map did, just placed in 3D
-space and given real environments instead of colored circles.
+The client uses React Three Fiber for the playable island scene. The scene
+visualizes the same `match:snapshot` and `ability:used` state used by the game
+server rather than maintaining a second gameplay model.
 
-## Island's real minimum: 5 players, one team
+The 3D scene contains distinct environments for the six zones, procedural
+elemental characters, ability effects, camera controls, and movement
+interpolation. It is lazy-loaded by `IslandMatch.tsx`, so screens that do not
+start a match do not pay the 3D bundle cost.
 
-`MIN_ROOM_PLAYERS` is 5 (`shared/src/constants.ts`), enforced through the
-existing `canStartRoom` ready-check - no new logic was needed. Five is also
-exactly enough to form **one** team under the existing team-size math
-(`calculateTeamCount(5) === 1`), so a minimum game is: one room, one team,
-five players, one of them secretly a traitor. See
-`docs/teams-and-roles.md` for the full reasoning.
+See `docs/game-world-3d.md` for the scene design and implementation details.
 
-## Elements & abilities (P15-P19)
+## Elements & abilities
 
-Full design notes live in `docs/elements-and-abilities.md`. In short: every
-player gets one of six elements (`shared/src/elements.ts`), balanced across
-the match (there are no teams yet to balance across individually); their
-avatar color now reflects it. Each element has exactly one ability
-(`shared/src/abilities.ts`) that targets either a zone (toggling it between
-open and blocked - the same action is helpful or disruptive purely
-depending on the zone's state when it's used, never a separate branch an
-observer could tell apart) or a task (see below). The doc also explains how
-P22's "traitor's help produces a different outcome" requirement is
-implemented as a tested-but-never-triggered hook, since traitor assignment
-itself doesn't exist until Stage F.
+Every player receives one of six elements: Fire, Water, Nature, Lightning,
+Earth, or Wind. Element assignment is balanced across the match.
 
-## Tasks & the team objective (P20-P24)
+Each element has one ability. Abilities use a generic `ability:use` message
+and are resolved authoritatively by the server. Zone-targeting abilities
+toggle a zone between open and blocked; Lightning targets tasks instead.
+Cooldowns are tracked server-side through `abilityReadyAt`.
 
-Full design notes live in `docs/task-system.md`, including the explicit
-"can progress be lost or duplicated" checklist P24 calls for. In short:
-tasks are static shared config (`shared/src/tasks.ts`) instantiated as
-per-match runtime state on `Match`, included in every snapshot
-(`tasks`/`objective` fields on `MatchSnapshotDTO`). Progress advances
-through the same ability pipeline as zone effects; one task
-("Activate the Circuit") requires two players with two different elements
-*currently* in the zone at once, not merely having contributed at some
-point, which is what makes it genuinely un-soloable.
+Successful ability use is broadcast as an anonymized `ability:used` event
+containing the element and zone rather than the acting player's identity.
+Rejections are returned only to the requesting player with a reason code.
 
-## The public/private split (P29-P34)
+## Tasks & shared objective
 
-Every system before this stage broadcast one identical view of a match to
-everyone. Starting with Stage F, `Match` produces two views:
+Tasks are defined in `shared/src/tasks.ts` and instantiated as per-match
+runtime state. Task progress and completion are part of `MatchSnapshotDTO`.
 
-- `getSnapshot()` - still identical for everyone. Gained `teamId` per
-  player and a `teams` list this stage (team membership is public).
-- `getPrivateStateFor(playerId)` - new, computed per player, sent only to
-  that player, every tick alongside the public snapshot. Contains role,
-  key status, and open private-thread summaries.
+Task contributions use the same authoritative ability pipeline as other
+gameplay actions. The cooperative task requires the configured number of
+distinct elements to be present together in the relevant zone, so progress
+cannot be completed by a single player acting alone.
 
-Full design notes: `docs/teams-and-roles.md` (teams, hidden roles, the key,
-traitor coordination) and `docs/chat-system.md` (global/team/private/
-traitor chat). The hidden-information guarantees both of these depend on
-are checked, item by item, in `docs/security-audit.md` - required reading
-before touching anything that adds a new kind of secret.
+Task runtime state also keeps server-only contribution history and
+instability data. These fields are deliberately absent from the public task
+DTO.
+
+## Teams, roles, key, and private state
+
+The minimum room size is `MIN_ROOM_PLAYERS = 5`. Team assignment targets the
+configured team size while respecting the minimum team size. Each team gets
+one traitor, and roles are kept in private server state.
+
+`Match` produces two views:
+
+- `getSnapshot()` is public and safe to broadcast to every player. Team
+  membership is included here.
+- `getPrivateStateFor(playerId)` is computed for one player and contains that
+  player's role, key status/content, private-chat information, and other
+  personal hidden state.
+
+The key has a single server-side holder. It can be transferred only inside an
+active private chat, is never duplicated, and cannot be transferred to a
+disconnected target.
+
+Traitor coordination is opt-in: both participants signal within a private
+thread before a traitor-only channel can unlock. The unlock state is private
+to the participants.
+
+See `docs/teams-and-roles.md` for the complete behavior and
+`docs/security-audit.md` for the hidden-information guarantees.
+
+## Chat system
+
+`MatchChat` owns four match channels: global, team, private, and traitor.
+
+- Global messages are broadcast to the whole match.
+- Team messages are sent only to members of the sender's team.
+- Private messages are sent directly to the two participants.
+- Traitor messages are available only to an unlocked traitor pair.
+
+All match channels share rate limiting, profanity masking, and capped history.
+Private and team delivery is constructed server-side from authoritative
+membership rather than client-supplied recipient lists.
+
+Mute is client-side. Reports are persisted by `PlayerReportStore`.
 
 ## Testing
 
-No new test framework was introduced. Both `shared` and `server` run tests
-with Node's built-in test runner, loaded through `tsx` so imports resolve
-the same way they do under `tsx watch` in dev
-(`node --import tsx --test "tests/**/*.test.ts"`). This was a deliberate
-choice over Node's native `--experimental-strip-types`: this codebase's
-`NodeNext` module resolution imports `./foo.js` specifiers that point at
-`./foo.ts` source files, and Node's native stripping (unlike `tsx`) doesn't
-resolve that pattern - only `tsx`'s loader does. Separately, TypeScript
-parameter properties (`constructor(private readonly x: Foo)`) turned out to
-not be supported even by `tsx`'s underlying stripping in strict-erasure
-mode, so every class in this codebase uses an explicit field + constructor
-assignment instead.
+`shared` and `server` use Node's built-in test runner through `tsx`:
 
-- `shared/tests/` - pure logic (the island map graph, adjacency and
-  validation helpers, element/ability/task config validation, the
-  profanity mask, team color helpers).
-- `server/tests/unit/` - pure functions and single classes in isolation
-  (movement validation including zone-blocking, `RoomManager` behavior,
-  the bug-report and player-report handlers, element/team/role assignment
-  fairness, key assignment, the rate limiter, the task-contribution and
-  cooperative-check resolvers) using a fake in-memory `Session`/socket
-  rather than a real connection.
-- `server/tests/integration/` - a real server on an ephemeral port, driven
-  by real `ws` client connections. Four suites: the original Stage A/B flow
-  (create-room -> join -> ready -> start -> move -> reconnect), a 6-player
-  Stage C/D flow (elements, zone-blocking, the cooperative task), a
-  12-player Stage E/F flow that's effectively P34's automated security
-  audit (teams, roles, the key, every chat channel, all checked for
-  scoping leaks by scanning each client's *entire* raw message log rather
-  than only the messages a test explicitly expected), and a focused P33
-  signal/traitor-channel test.
+```text
+node --import tsx --test "tests/**/*.test.ts"
+```
 
-## Deliberately not built yet
+The test suite includes:
 
-Per the roadmap, none of the following exist yet, even as stubs beyond what
-P4-P34 explicitly called for: multiple abilities per player, per-team
-tasks/objectives, environmental hazards beyond ability-caused zone
-blocking, delayed task failure from instability, elimination, accusation/
-voting, or any win-condition/results logic. Adding speculative scaffolding
-for these now would guess at designs the later stages haven't made yet. The
-one deliberate exception - documented in detail in
-`docs/elements-and-abilities.md` - is the P22 sabotage-lever *mechanism*,
-which the roadmap itself says should be "quietly live" before Stage F
-exists to trigger it; Stage F's own role assignment still never calls into
-it, since wiring the two together isn't something either stage's DoD asks
-for.
+- `shared/tests/` for map validation, element/ability/task configuration,
+  moderation helpers, and team helpers.
+- `server/tests/unit/` for movement, rooms, reports, assignment logic, key
+  handling, rate limiting, and task contribution behavior.
+- `server/tests/integration/` for real WebSocket flows covering rooms,
+  reconnects, movement, elements, tasks, chat, teams, roles, key handling,
+  and hidden-information isolation.
 
-## Changelog
+The hidden-information integration tests inspect each client's complete raw
+message log, not only messages a test explicitly expects. This makes the
+security checks resilient to accidental leaks through unexpected message
+paths.
 
-- **P1-P3**: monorepo, WebSocket handshake, ping/pong.
-- **P4-P9 (Stage A)**: app shell/routing, rooms, real-time lobby, sessions,
-  the match tick-loop skeleton, settings + bug reporting. The original P3
-  echo-test client (`client/src/services/websocket.ts`) was replaced by
-  `client/src/net/GameClient.ts`, a typed client that owns session/room/match
-  state and exposes it to React - the P3 scaffold had no way to route more
-  than one message type and needed to grow up into this regardless.
-- **P10-P14 (Stage B)**: the island zone graph, its SVG rendering, avatars,
-  and server-validated zone-to-zone movement with real-time sync.
-- **P15-P19 (Stage C)**: elemental identity (six elements, balanced
-  assignment), the generic one-ability-per-element targeting model, and the
-  zone-blocking mechanic abilities use to be genuinely dual-use. Avatar
-  color changed from an arbitrary per-player hash to the player's element's
-  color. Movement's `checkMove` gained a `targetZoneBlocked` check.
-- **P20-P24 (Stage D)**: task data model and placement, task interaction UI,
-  ability-gated task completion (including the tested-but-dormant P22
-  sabotage lever), a genuinely un-soloable cooperative task, and a team
-  objective meter. `MatchSnapshotDTO` gained `zones`, `tasks`, and
-  `objective` fields.
-- **P25-P28 (Stage E)**: global, team, and limited private chat, all
-  through one `MatchChat` service with shared rate limiting and profanity
-  masking; mute (client-only) and report (persisted, mirrors
-  `BugReportStore`). New `match:chat:*` / `privateChat:*` message family,
-  distinct from Stage A's `room:chat:*` lobby placeholder.
-- **P29-P34 (Stage F)**: teams, hidden traitor roles, the secret key and
-  its private-chat-gated transfer, opt-in traitor-pair signaling and a
-  traitor-only channel, and the security audit verifying none of it leaks.
-  `Match` now produces two views (`getSnapshot()` public,
-  `getPrivateStateFor()` private) instead of one - the architectural
-  change this stage's guarantees all rest on.
-- **3D world + 5-player minimum**: replaced the flat SVG map with a real
-  React Three Fiber 3D scene (distinct environments per zone, six visually
-  distinct elemental characters, ability effects, a movable camera - see
-  `docs/game-world-3d.md`), lazy-loaded so it doesn't cost anything on
-  screens that don't need it. Separately, `MIN_ROOM_PLAYERS` was raised
-  from the dev-testing value of 2 to Island's real minimum of 5, which
-  also happens to be exactly enough to form one team under the existing
-  team-size math - no new logic needed, just the constant and the tests/
-  docs that assumed the old value.
+## Current implementation boundaries
+
+The current game intentionally keeps several systems simple:
+
+- One ability is assigned to each player.
+- Tasks and the shared objective are match-wide.
+- Environmental hazards are not active game logic.
+- There is no player elimination state.
+- There is no accusation or voting system.
+- There is no gameplay win-condition/results system beyond the current match
+  lifecycle.
+- Task instability is tracked internally but does not currently trigger a
+  delayed task failure.
+
+These boundaries reflect the code that is actually present and tested.

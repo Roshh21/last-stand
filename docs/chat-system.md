@@ -1,12 +1,12 @@
 # Chat System
 
-Covers Stage E (P25-P28): global, team, and limited private chat, plus
+global, team, and limited private chat, plus
 basic moderation. See `shared/src/chat.ts` for the wire types and
 `server/src/match/MatchChat.ts` for the server-authoritative implementation
 every channel routes through.
 
 This is a different, richer system from the lobby chat placeholder built in
-P6 (`room:chat:*`) - that one still exists unchanged, scoped to the
+the room system (`room:chat:*`) - that one still exists unchanged, scoped to the
 pre-game room. Everything here is scoped to a `Match` and is
 `match:chat:*` / `privateChat:*` / `traitorChat:*`.
 
@@ -19,7 +19,7 @@ state directly - `Match` hands it a `lookup(playerId)` callback returning
 just what it needs (nickname, team, connection, role) so `MatchChat` can't
 accidentally develop its own, possibly-stale copy of player state.
 
-## Global chat (P25)
+## Global chat
 
 The simplest channel: `match:chat:send { channel: "global" }` broadcasts to
 every player in the match. Two safeguards apply to every channel, not just
@@ -27,8 +27,7 @@ this one:
 
 - **Rate limiting** (`server/src/utils/RateLimiter.ts`): a basic fixed-window
   limiter (`CHAT_RATE_LIMIT_COUNT` messages per `CHAT_RATE_LIMIT_WINDOW_MS`).
-  A window is simpler than a sliding log and is what P25 asks for -
-  "basic... spam protection," not a production-grade solution.
+  A window is simpler than a sliding log and is what is appropriate for the current game - basic spam protection rather than a production-grade moderation service.
 - **Profanity masking** (`shared/src/moderation.ts`): server-side,
   authoritative, before broadcast - the client never receives unmasked text
   it would have to censor itself. The word list is deliberately small and
@@ -36,10 +35,9 @@ this one:
   it with a proper moderation service.
 
 History is capped at `MATCH_CHAT_HISTORY_LIMIT` and resent on reconnect via
-`match:chat:history` - the same rehydration pattern Stage A established for
-room chat.
+`match:chat:history` - the same rehydration pattern the room chat system already uses.
 
-## Team chat (P26)
+## Team chat
 
 `match:chat:send { channel: "team" }` resolves the sender's team
 server-side (`Match.getTeamIdFor`) and broadcasts only to
@@ -50,11 +48,7 @@ not from anything the client asserts. This is exercised directly in
 one team, and a player on the other team's entire raw message log is
 searched and confirmed to never contain it.
 
-**System messages:** the roadmap's own example ("Task completed in Power
-Station") assumes team-scoped tasks, which Stage D doesn't have - tasks are
-match-wide, shared by every team (see docs/task-system.md). Retrofitting
-tasks to be per-team would be a real redesign of Stage D, out of scope
-here. Instead, `Match.setConnected()` posts a genuinely team-scoped system
+**System messages:** team-scoped system messages are used for connection-status changes, while tasks remain match-wide and shared by every team. Instead, `Match.setConnected()` posts a genuinely team-scoped system
 message ("Alice disconnected." / "Alice reconnected.") whenever a
 teammate's connection status changes - the same underlying mechanism
 (`MatchChat.postTeamSystemMessage`), a real and useful trigger rather than
@@ -62,7 +56,7 @@ a contrived one. System messages carry `isSystem: true` and a `"system"`
 sender id so the client can style them distinctly and never offer a
 mute/report action on them.
 
-## Private chat (P27)
+## Private chat
 
 Private conversations are a **limited resource**, not free-form DMs:
 
@@ -87,7 +81,7 @@ Opening a thread also notifies *both* sides (`privateChat:opened`) - the
 target should know someone wants to talk to them, the same as getting a DM
 request in any real chat app.
 
-## Moderation (P28)
+## Moderation
 
 - **Mute** is entirely client-side (`GameClient.toggleMute`) - a local
   filter over already-received messages, never sent to the server. No
@@ -104,11 +98,9 @@ request in any real chat app.
   messages from the same sender collapse the repeated nickname, matching
   the "message grouping" ask.
 
-## What P28's "playtest all three channels at once" became
+## Verification
 
-The roadmap's own DoD for P28 calls for a manual playtest with 3+ people.
-The automated equivalent - and the more rigorous one, since it inspects
-actual wire traffic rather than relying on a human noticing a leak - is
+The automated integration test is the strongest repeatable verification because it inspects actual wire traffic rather than relying on a human noticing a leak. It is
 `server/tests/integration/teamsRolesAndChat.test.ts`'s 12-player test,
 which exercises global, team, and private chat all at once in a single
 match and asserts the scoping boundaries hold. See

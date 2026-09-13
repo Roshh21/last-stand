@@ -1,6 +1,6 @@
 # The 3D Island
 
-This replaces the flat SVG node-graph map (Stage B's original P11) with a
+This replaces the flat SVG node-graph map (the original 2D map) with a
 real, explorable 3D scene: a genuine island with distinct environments per
 zone, and elemental characters with visually distinct bodies, materials,
 and particle effects instead of colored circles.
@@ -58,7 +58,7 @@ from `shared/src/map/islandMap.ts`) a fixed 3D ground position, laid out to
 mirror the old 2D map's spatial relationships (Camp central, Forest
 upper-left, Beach lower-left, Dock lower-right, Power Station upper-right,
 Abandoned House right-of-center). The underlying adjacency graph - what's
-actually reachable from where - is exactly the same shared data Stage B
+actually reachable from where - is exactly the same shared data
 already validated; only where things are drawn changed.
 
 ## Distinct environments per zone (`three/ZoneMarker3D.tsx`)
@@ -72,7 +72,7 @@ Each zone is a clickable ground platform plus a bespoke set-piece:
 - **Beach** - sandy platform, two palm trees, a few scattered rocks.
 - **Dock** - a wooden plank pier on pilings, extending toward the water.
 - **Power Station** - clustered tanks and a building block, with a
-  flickering red warning light (this is the roadmap's own example task
+  flickering red warning light (this is the project's own example task
   location, and visually the most "industrial" zone since all three tasks
   live here).
 - **Abandoned House** - a single tilted house with a broken plank leaning
@@ -88,7 +88,7 @@ same class of issue fixed earlier for `Date.now()` - see
 same scattered-looking layout every time without calling any impure API.
 
 Reachable zones get an amber highlight ring; the player's current zone gets
-a teal one; a blocked zone (P17/P18's ability-driven mechanic, unchanged)
+a teal one; a blocked zone (the existing ability-driven mechanic)
 gets a red pulsing torus. An incomplete task at a zone shows a small
 rotating marker above it. Path connectors between zones
 (`three/PathConnectors.tsx`) recolor from tan to dark red when either end
@@ -118,16 +118,14 @@ what the one verification pass already covered. A standard transparent
 - the safer choice given the verification constraints above.
 
 Movement between zones reuses the exact `movement` field the server
-already provides (`fromZoneId`/`toZoneId`/`startedAt`/`durationMs`, from
-Stage B) - `computeCharacterPosition()` eases between the two zones'
+already provides (`fromZoneId`/`toZoneId`/`startedAt`/`durationMs`, from the shared map) - `computeCharacterPosition()` eases between the two zones'
 positions over that same window, so what you see is a direct visualization
 of authoritative server state, not a separate client-side animation
 system the server knows nothing about.
 
 ## Ability effects (`three/AbilityEffectBurst.tsx`)
 
-Every `ability:used` event (already anonymized per P19 - element and zone
-only, never a player id) spawns a short-lived expanding ring + spark burst
+Every `ability:used` event (anonymized to element and zone only, never a player id) spawns a short-lived expanding ring + spark burst
 at that zone's position, colored by the element. This is purely a
 visualization of an event the client already receives; no new server data
 was needed.

@@ -1,12 +1,12 @@
 # Task System
 
-Covers Stage D (P20-P24). See `shared/src/tasks.ts` for the data model and
+See `shared/src/tasks.ts` for the data model and
 placement, and `server/src/match/Match.ts` for the runtime state and how
 abilities connect to it (the ability side of this is covered in more depth
 in `docs/elements-and-abilities.md` - this file focuses on tasks and the
 team objective).
 
-## Data model & placement (P20)
+## Data model & placement
 
 `TaskDefinition` is static, shared config - the same pattern as the island
 map (`shared/src/map/islandMap.ts`): one source of truth, imported by both
@@ -20,12 +20,12 @@ interface TaskDefinition {
   name: string;
   requiredElements: ElementId[];
   completionThreshold: number;
-  minContributors: number;         // P23
-  requiredDistinctElements: number; // P23
+  minContributors: number;
+  requiredDistinctElements: number;
 }
 ```
 
-Three tasks are placed at the Power Station, matching the roadmap's own
+Three tasks are placed at the Power Station, matching the project's
 example almost verbatim:
 
 | Task | Requires | Cooperative? |
@@ -37,14 +37,14 @@ example almost verbatim:
 Runtime state (`progress`, `completed`) is per-match, built fresh from this
 config in `Match`'s constructor and included in every `match:snapshot`
 broadcast (`TaskStateDTO`) - `progress` and `completed` are the only
-runtime fields exposed; see P22 below for what's deliberately excluded.
+runtime fields exposed; see the ability-gated completion section below for what's deliberately excluded.
 
 `validateTaskDefinitions()` checks every task's `zoneId` against the real
 map, checks thresholds and contributor counts are sane, and runs in
 `shared/tests/elementsAbilitiesTasks.test.ts` - the same structural-check
 pattern as the island map's `validateMapGraph()`.
 
-## Task interaction (P21)
+## Task interaction
 
 There's no separate "interact" message. Standing in a zone with a task is
 enough to see it - `IslandMatch.tsx` filters `match.tasks` down to whatever
@@ -60,14 +60,13 @@ Deliberately absent, per the design's "no action proves guilt" principle:
 the button to use your ability on a task is never disabled just because
 your element doesn't match. Disabling it would leak information a real
 player wouldn't have (elements aren't secret here, but the *convention* of
-never letting UI state signal "this won't help" is one Stage F's hidden
-roles will depend on later).
+never letting UI state signal "this won't help" is the hidden-role system depends on the private-state boundaries documented elsewhere).
 
-## Ability-gated completion (P22)
+## Ability-gated completion
 
 Every ability use on a task runs through `resolveTaskContribution()` (see
 `docs/elements-and-abilities.md` for the full reasoning behind its
-`isSaboteur` parameter, which nothing in P15-P24 ever sets to `true`). The
+`isSaboteur` parameter, which the active gameplay path currently sets to `false`). The
 short version: right element -> real progress; wrong element -> nothing.
 Progress is clamped to `completionThreshold`, and `completed` flips once
 progress reaches it.
@@ -75,11 +74,11 @@ progress reaches it.
 The one thing worth restating here: `TaskStateDTO` (what actually goes over
 the wire) has no `instability` field and no contribution history. Those
 live only on the server's internal `TaskRuntimeState`. A client - now or
-once Stage F exists - can never distinguish "this contribution happened to
+even when hidden roles are involved - can never distinguish "this contribution happened to
 be smaller" from "this player is flagged as something." That's the whole
 point of building the lever this way.
 
-## Cooperative tasks (P23)
+## Cooperative tasks
 
 `checkCooperativeRequirement()` (`server/src/match/taskContribution.ts`)
 checks who is **physically present in the task's zone at this exact
@@ -108,26 +107,25 @@ This is a deliberate choice over tracking historical contributors:
 Disconnected players don't count toward "present" - someone who dropped
 mid-task can't be a phantom third contributor holding a slot open.
 
-## Team objective (P24)
+## Team objective
 
 `ObjectiveStateDTO` is deliberately simple for V1: `requiredTasks` defaults
 to *every* task (`getRequiredObjectiveTaskCount`), so "met" means the whole
-task list is done. Nothing acts on `met` yet - no win condition fires, no
-match ends because of it. That's Stage I (P43+), much later; this phase's
+task list is done. Nothing acts on `met` currently - no win condition fires, no
+match ends because of it. No win condition is currently attached to it; the
 job was only to make the progress visible and durable, which
 `ObjectiveMeter.tsx` does as a simple "X / Y tasks" bar.
 
-### Can task progress ever be lost or duplicated? (P24 checklist)
+### Can task progress ever be lost or duplicated?
 
-This is the internal checklist P24 explicitly asks for, kept here rather
-than as a comment so it's easy to revisit as later stages touch this code.
+This checklist is kept here rather than as a comment so the state-management guarantees remain easy to verify as the code changes.
 
 - **Lost on disconnect?** No. Task state lives on the `Match` instance
   itself, keyed by task id - never on any per-player structure. A
   disconnecting player only flips their own `connected` flag
   (`Match.setConnected`); nothing about task progress is touched.
 - **Lost on reconnect?** No - and nothing extra had to be built for this.
-  `sendRehydration()` (Stage A) already resends the latest full
+  `sendRehydration()` (the session system) already resends the latest full
   `match:snapshot` on `session:resumed`, and tasks/objective are just
   fields on that same snapshot. Persistence "fell out" of the existing
   architecture rather than needing new code.
@@ -146,7 +144,7 @@ than as a comment so it's easy to revisit as later stages touch this code.
   if a client-side bug caused the same logical `ability:use` to be sent
   twice, both would be independently validated and (cooldown permitting)
   both would apply. This is a real gap, not a false one: worth revisiting
-  if a future stage's client ever needs optimistic retries. It doesn't
+  if the client later needs optimistic retries. It doesn't
   affect the reconnect flow itself, which never resends past actions - only
   the latest state.
 - **Can two players' simultaneous contributions race each other?** No -
