@@ -37,6 +37,12 @@ after(async () => {
 test("full flow: create/join room, ready up, start, move, and reconnect mid-match", async () => {
   const alice = await TestClient.connect(baseUrl);
   const bob = await TestClient.connect(baseUrl);
+  // Island's real minimum is 5 - three more players just need to join and ready up.
+  const filler = await Promise.all([
+    TestClient.connect(baseUrl),
+    TestClient.connect(baseUrl),
+    TestClient.connect(baseUrl),
+  ]);
 
   // --- Session establishment (P7) ---
   alice.send("session:hello", { nickname: "Alice" });
@@ -49,6 +55,11 @@ test("full flow: create/join room, ready up, start, move, and reconnect mid-matc
   assert.ok(aliceCreated.payload.sessionToken);
   assert.notEqual(aliceCreated.payload.playerId, bobCreated.payload.playerId);
 
+  for (let i = 0; i < filler.length; i++) {
+    filler[i].send("session:hello", { nickname: `Filler${i}` });
+    await filler[i].waitFor<SessionInfoDTO>("session:created");
+  }
+
   // --- Room create/join (P5) ---
   alice.send("room:create", {});
   const roomAfterCreate = await alice.waitFor<RoomStateDTO>("room:state");
@@ -60,20 +71,24 @@ test("full flow: create/join room, ready up, start, move, and reconnect mid-matc
   const roomCode = roomAfterCreate.payload.code;
 
   bob.send("room:join", { code: roomCode });
+  for (const client of filler) {
+    client.send("room:join", { code: roomCode });
+  }
+
   const bobRoomState = await bob.waitForMatching<RoomStateDTO>(
     "room:state",
-    (state) => state.players.length === 2,
+    (state) => state.players.length === 5,
   );
   const aliceSeesJoin = await alice.waitForMatching<RoomStateDTO>(
     "room:state",
-    (state) => state.players.length === 2,
+    (state) => state.players.length === 5,
   );
 
   assert.deepEqual(
     bobRoomState.payload.players.map((p) => p.nickname).sort(),
-    ["Alice", "Bob"],
+    ["Alice", "Bob", "Filler0", "Filler1", "Filler2"],
   );
-  assert.equal(aliceSeesJoin.payload.players.length, 2);
+  assert.equal(aliceSeesJoin.payload.players.length, 5);
 
   // --- Ready state + real-time lobby sync (P6) ---
   alice.send("room:setReady", { ready: true });
@@ -83,10 +98,13 @@ test("full flow: create/join room, ready up, start, move, and reconnect mid-matc
   );
 
   bob.send("room:setReady", { ready: true });
+  for (const client of filler) {
+    client.send("room:setReady", { ready: true });
+  }
+
   await bob.waitForMatching<RoomStateDTO>(
     "room:state",
-    (state) =>
-      state.players.every((p) => p.ready) && state.players.length === 2,
+    (state) => state.players.every((p) => p.ready) && state.players.length === 5,
   );
 
   // --- Lobby chat placeholder ---
@@ -110,7 +128,7 @@ test("full flow: create/join room, ready up, start, move, and reconnect mid-matc
     8000,
   );
 
-  assert.equal(inProgress.payload.players.length, 2);
+  assert.equal(inProgress.payload.players.length, 5);
 
   const aliceStart = inProgress.payload.players.find(
     (p) => p.playerId === aliceCreated.payload.playerId,
@@ -196,7 +214,11 @@ test("full flow: create/join room, ready up, start, move, and reconnect mid-matc
       snapshot.players.find((p) => p.playerId === aliceCreated.payload.playerId)?.connected === true,
   );
 
-  await Promise.all([aliceReconnected.closeAndWait(), bob.closeAndWait()]);
+  await Promise.all([
+    aliceReconnected.closeAndWait(),
+    bob.closeAndWait(),
+    ...filler.map((client) => client.closeAndWait()),
+  ]);
 });
 
 test("joining with a garbage room code is rejected without crashing the server", async () => {

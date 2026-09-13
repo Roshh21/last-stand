@@ -318,51 +318,48 @@
   color: var(--accent-strong);
 }
 
-.zone-map {
+.island-3d-canvas {
   width: 100%;
-  height: auto;
-  background: var(--bg-inset);
+  height: 420px;
   border-radius: 10px;
   border: 1px solid var(--border);
+  overflow: hidden;
+  background: #bcdff0;
 }
 
-.zone-node .zone-shape {
-  fill: var(--bg-raised);
-  stroke: var(--border);
-  stroke-width: 2;
-  transition: stroke 0.15s;
+.island-3d-canvas canvas {
+  display: block;
+  outline: none;
 }
 
-.zone-node.reachable .zone-shape {
-  stroke: var(--accent);
+.island-3d-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-family: var(--mono);
 }
 
-.zone-node.reachable {
-  cursor: pointer;
-}
-
-.zone-node.current .zone-shape {
-  stroke: var(--ok);
-  stroke-width: 3;
-}
-
-.zone-label {
-  fill: var(--text-dim);
+.character-label {
   font-family: var(--mono);
   font-size: 11px;
-  text-anchor: middle;
+  color: #17110a;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(-4px);
 }
 
-.zone-edge {
-  stroke: var(--border);
-  stroke-width: 2;
+.character-label-me {
+  background: var(--accent-strong);
+  font-weight: 700;
 }
 
-.zone-occupant-count {
-  fill: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 10px;
-  text-anchor: middle;
+.character-label-disconnected {
+  opacity: 0.5;
+  text-decoration: line-through;
 }
 
 .match-layout {
@@ -439,4 +436,328 @@
 
 .icon-button:hover {
   color: var(--text);
+}
+
+/* --- Elements & abilities (P15-P19) --- */
+
+.island-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.element-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.element-badge-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ability-panel h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ability-log {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.ability-log-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+
+.ability-log-line {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+/* --- Tasks & objective (P20-P24) --- */
+
+.objective-meter {
+  margin-top: 4px;
+}
+
+.objective-meter-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-card {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: left;
+}
+
+.task-card[data-completed="true"] {
+  opacity: 0.7;
+}
+
+.task-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.task-name {
+  font-weight: 600;
+}
+
+.task-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.task-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.task-progress-fill.objective-fill {
+  background: var(--ok);
+}
+
+.task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+/* --- Teams & hidden roles (P29-P30) --- */
+
+.team-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.team-roster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.team-roster-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-inset);
+}
+
+.team-roster-name {
+  font-weight: 700;
+  font-family: var(--mono);
+  margin-bottom: 6px;
+}
+
+.team-roster-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.team-roster-members li {
+  padding: 2px 0;
+}
+
+.team-roster-members li[data-connected="false"] {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.role-reveal {
+  background: var(--bg-raised);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 36px 28px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+}
+
+.role-reveal h1 {
+  font-size: 30px;
+  margin: 10px 0 16px;
+}
+
+.role-reveal-kicker {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.role-reveal-body {
+  color: var(--text-dim);
+  margin-bottom: 22px;
+}
+
+.role-reveal-loyal {
+  border-color: var(--ok);
+}
+
+.role-reveal-loyal h1 {
+  color: var(--ok);
+}
+
+.role-reveal-traitor {
+  border-color: var(--danger);
+}
+
+.role-reveal-traitor h1 {
+  color: var(--danger);
+}
+
+/* --- The key (P31-P32) --- */
+
+.key-badge {
+  background: var(--bg-raised);
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  padding: 16px 20px;
+  text-align: center;
+}
+
+.key-badge-title {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 12px;
+  color: var(--danger);
+  margin-bottom: 8px;
+}
+
+.key-badge-content {
+  font-family: var(--mono);
+  font-style: italic;
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+/* --- Match chat (P25-P28, P32-P33) --- */
+
+.chat-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.chat-tab {
+  position: relative;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.chat-tab[data-active="true"] {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.chat-tab-new {
+  border-style: dashed;
+}
+
+.unread-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  margin-left: 6px;
+}
+
+.new-thread-picker {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.chat-line-system {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.chat-line-actions {
+  margin-left: 8px;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.chat-line-action {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.chat-line-action:hover {
+  color: var(--text-dim);
+}
+
+.traitor-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--danger);
+  white-space: nowrap;
 }

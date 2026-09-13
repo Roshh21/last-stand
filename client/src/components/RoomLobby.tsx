@@ -21,8 +21,8 @@ function CreateOrJoin({ error }: { error: string | null }) {
     <div className="card">
       <h2>Island</h2>
       <p className="subtitle">
-        A 20-50 player survival &amp; social-deduction game. (The dev lobby currently allows 2-50 for
-        testing.)
+        A 5-50 player survival &amp; social-deduction game. Every 5 players form a team with a hidden
+        traitor among them.
       </p>
 
       <div className="button-row">

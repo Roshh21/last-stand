@@ -1,5 +1,6 @@
 import type { BugReportStore } from "../bugReports/BugReportStore.js";
 import type { MatchManager } from "../match/MatchManager.js";
+import type { PlayerReportStore } from "../moderation/PlayerReportStore.js";
 import type { RoomManager } from "../rooms/RoomManager.js";
 import type { SessionManager } from "../session/SessionManager.js";
 
@@ -8,4 +9,5 @@ export interface RouterContext {
   roomManager: RoomManager;
   matchManager: MatchManager;
   bugReportStore: BugReportStore;
+  playerReportStore: PlayerReportStore;
 }

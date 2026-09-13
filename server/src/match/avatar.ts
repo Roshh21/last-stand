@@ -1,40 +1,25 @@
 import { createHash } from "node:crypto";
 
-import type { AvatarShape, PlayerAvatar } from "@last-stand/shared";
+import { getElement, type AvatarShape, type ElementId, type PlayerAvatar } from "@last-stand/shared";
 
 /**
- * Element-neutral placeholder identity (P12). Deliberately has nothing to do
- * with the real elemental system (Stage C, P15+) - just a color + shape so
- * players are visually distinct from each other on the map and roster.
+ * Avatar shape is still a deterministic-per-player placeholder (P12) - it
+ * exists purely so two players with the same element are still visually
+ * distinguishable from each other. Color is no longer arbitrary: as of P15,
+ * it's the player's assigned element's canonical color, so a glance at the
+ * roster or map tells you who's playing what.
  */
-const AVATAR_COLORS = [
-  "#e63946",
-  "#f4a261",
-  "#e9c46a",
-  "#2a9d8f",
-  "#457b9d",
-  "#8338ec",
-  "#ff006e",
-  "#3a86ff",
-  "#06d6a0",
-  "#ef476f",
-];
+const AVATAR_SHAPES: AvatarShape[] = ["circle", "square", "triangle", "diamond", "hexagon", "star"];
 
-const AVATAR_SHAPES: AvatarShape[] = [
-  "circle",
-  "square",
-  "triangle",
-  "diamond",
-  "hexagon",
-  "star",
-];
-
-/** Same playerId always yields the same avatar - no server-side storage needed. */
-export function assignAvatar(playerId: string): PlayerAvatar {
+export function pickAvatarShape(playerId: string): AvatarShape {
   const hash = createHash("sha256").update(playerId).digest();
 
+  return AVATAR_SHAPES[hash[1] % AVATAR_SHAPES.length];
+}
+
+export function buildAvatar(playerId: string, element: ElementId): PlayerAvatar {
   return {
-    color: AVATAR_COLORS[hash[0] % AVATAR_COLORS.length],
-    shape: AVATAR_SHAPES[hash[1] % AVATAR_SHAPES.length],
+    color: getElement(element).color,
+    shape: pickAvatarShape(playerId),
   };
 }

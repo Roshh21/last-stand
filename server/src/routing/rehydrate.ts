@@ -44,6 +44,38 @@ export function sendRehydration(ctx: RouterContext, session: Session): void {
 
     if (match) {
       ctx.sessionManager.sendToSession(session, "match:snapshot", match.getSnapshot());
+
+      const privateState = match.getPrivateStateFor(session.playerId);
+
+      if (privateState) {
+        ctx.sessionManager.sendToSession(session, "match:privateState", privateState);
+      }
+
+      ctx.sessionManager.sendToSession(session, "match:chat:history", {
+        channel: "global",
+        messages: match.getGlobalChatHistory(),
+      });
+
+      const teamId = match.getTeamIdFor(session.playerId);
+
+      if (teamId) {
+        ctx.sessionManager.sendToSession(session, "match:chat:history", {
+          channel: "team",
+          messages: match.getTeamChatHistory(teamId),
+        });
+      }
+
+      if (privateState) {
+        for (const thread of privateState.openThreads) {
+          const messages = match.getPrivateThreadHistory(session.playerId, thread.otherPlayerId) ?? [];
+
+          ctx.sessionManager.sendToSession(session, "match:chat:history", {
+            channel: thread.traitorChannelUnlocked ? "traitor" : "private",
+            otherPlayerId: thread.otherPlayerId,
+            messages,
+          });
+        }
+      }
     }
   }
 }

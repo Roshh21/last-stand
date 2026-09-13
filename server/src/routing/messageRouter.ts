@@ -2,8 +2,18 @@ import type { MessageEnvelope } from "@last-stand/shared";
 
 import type { Session } from "../session/types.js";
 import type { RouterContext } from "./context.js";
+import { handleAbilityUse } from "./handlers/abilityHandlers.js";
 import { handleBugReportSubmit } from "./handlers/bugReportHandlers.js";
+import { handleKeyTransfer } from "./handlers/keyHandlers.js";
 import { handleMatchMove } from "./handlers/matchHandlers.js";
+import {
+  handleMatchChatSend,
+  handlePrivateChatOpen,
+  handlePrivateChatSend,
+  handlePrivateChatSignal,
+  handleTraitorChatSend,
+} from "./handlers/matchChatHandlers.js";
+import { handleModerationReport } from "./handlers/moderationHandlers.js";
 import { handlePing } from "./handlers/pingHandlers.js";
 import {
   handleRoomChatSend,
@@ -51,6 +61,38 @@ export function routeMessage(ctx: RouterContext, session: Session, message: Mess
 
     case "match:move":
       handleMatchMove(ctx, session, message.payload);
+      break;
+
+    case "ability:use":
+      handleAbilityUse(ctx, session, message.payload);
+      break;
+
+    case "match:chat:send":
+      handleMatchChatSend(ctx, session, message.payload);
+      break;
+
+    case "privateChat:open":
+      handlePrivateChatOpen(ctx, session, message.payload);
+      break;
+
+    case "privateChat:send":
+      handlePrivateChatSend(ctx, session, message.payload);
+      break;
+
+    case "privateChat:signal":
+      handlePrivateChatSignal(ctx, session, message.payload);
+      break;
+
+    case "traitorChat:send":
+      handleTraitorChatSend(ctx, session, message.payload);
+      break;
+
+    case "key:transfer":
+      handleKeyTransfer(ctx, session, message.payload);
+      break;
+
+    case "moderation:report":
+      handleModerationReport(ctx, session, message.payload);
       break;
 
     case "bugReport:submit":

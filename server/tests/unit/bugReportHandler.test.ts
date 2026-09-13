@@ -8,6 +8,7 @@ import type { WebSocket } from "ws";
 
 import { BugReportStore } from "../../src/bugReports/BugReportStore.js";
 import { MatchManager } from "../../src/match/MatchManager.js";
+import { PlayerReportStore } from "../../src/moderation/PlayerReportStore.js";
 import { RoomManager } from "../../src/rooms/RoomManager.js";
 import type { RouterContext } from "../../src/routing/context.js";
 import { handleBugReportSubmit } from "../../src/routing/handlers/bugReportHandlers.js";
@@ -18,13 +19,15 @@ import { FakeSocket } from "../support/fakeSocket.js";
 function setup() {
   const tmpDir = mkdtempSync(join(tmpdir(), "last-stand-bugreports-"));
   const filePath = join(tmpDir, "bug-reports.jsonl");
+  const reportPath = join(tmpDir, "player-reports.jsonl");
 
   const sessionManager = new SessionManager();
   const roomManager = new RoomManager(sessionManager);
   const matchManager = new MatchManager(sessionManager);
   const bugReportStore = new BugReportStore(filePath);
+  const playerReportStore = new PlayerReportStore(reportPath);
 
-  const ctx: RouterContext = { sessionManager, roomManager, matchManager, bugReportStore };
+  const ctx: RouterContext = { sessionManager, roomManager, matchManager, bugReportStore, playerReportStore };
 
   const helloResult = sessionManager.handleHello({ nickname: "Tester" });
 

@@ -29,7 +29,14 @@ export function IslandScreen() {
     }
 
     return (
-      <IslandMatch match={state.match} session={state.session} lastMoveRejection={state.lastMoveRejection} />
+      <IslandMatch
+        match={state.match}
+        session={state.session}
+        privateState={state.privateState}
+        lastMoveRejection={state.lastMoveRejection}
+        lastAbilityRejection={state.lastAbilityRejection}
+        abilityLog={state.abilityLog}
+      />
     );
   }
 

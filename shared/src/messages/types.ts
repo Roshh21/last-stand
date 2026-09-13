@@ -29,6 +29,28 @@ export type MessageType =
   | "match:snapshot"
   | "match:move"
   | "match:moveRejected"
+  // elemental abilities (P16-P19)
+  | "ability:use"
+  | "ability:used"
+  | "ability:rejected"
+  // private, per-player match state: role, key, private threads (P30-P33)
+  | "match:privateState"
+  // in-match chat: global, team, private, traitor (P25-P28, P32-P33)
+  | "match:chat:send"
+  | "match:chat:message"
+  | "match:chat:history"
+  | "match:chat:rejected"
+  | "privateChat:open"
+  | "privateChat:opened"
+  | "privateChat:send"
+  | "privateChat:signal"
+  | "traitorChat:send"
+  // the secret key (P31-P32)
+  | "key:transfer"
+  | "key:transferRejected"
+  // moderation (P28)
+  | "moderation:report"
+  | "moderation:reportAck"
   // bug reporting (P9)
   | "bugReport:submit"
   | "bugReport:ack"

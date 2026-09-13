@@ -12,6 +12,8 @@ export interface MovementCheckInput {
   /** Server timestamp (ms) after which a move is allowed again. */
   movementReadyAt: number;
   now: number;
+  /** Whether the target zone is currently blocked (P17/P18 ability effects). */
+  targetZoneBlocked: boolean;
 }
 
 export type MovementCheckResult = { ok: true } | { ok: false; reason: MoveRejectReason };
@@ -22,7 +24,7 @@ export type MovementCheckResult = { ok: true } | { ok: false; reason: MoveReject
  * gets to assert its own position, only request a move.
  */
 export function checkMove(input: MovementCheckInput): MovementCheckResult {
-  const { map, currentZoneId, targetZoneId, movementReadyAt, now } = input;
+  const { map, currentZoneId, targetZoneId, movementReadyAt, now, targetZoneBlocked } = input;
 
   if (now < movementReadyAt) {
     return { ok: false, reason: "on_cooldown" };
@@ -38,6 +40,10 @@ export function checkMove(input: MovementCheckInput): MovementCheckResult {
 
   if (!isZoneAdjacent(map, currentZoneId, targetZoneId)) {
     return { ok: false, reason: "not_adjacent" };
+  }
+
+  if (targetZoneBlocked) {
+    return { ok: false, reason: "zone_blocked" };
   }
 
   return { ok: true };

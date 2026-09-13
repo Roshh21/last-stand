@@ -5,6 +5,7 @@ import { WebSocketServer } from "ws";
 import { BugReportStore } from "./bugReports/BugReportStore.js";
 import { APP_VERSION } from "./config.js";
 import { MatchManager } from "./match/MatchManager.js";
+import { PlayerReportStore } from "./moderation/PlayerReportStore.js";
 import { RoomManager } from "./rooms/RoomManager.js";
 import type { RouterContext } from "./routing/context.js";
 import type { Session } from "./session/types.js";
@@ -37,8 +38,9 @@ export function createApp(): App {
   const roomManager = new RoomManager(sessionManager);
   const matchManager = new MatchManager(sessionManager);
   const bugReportStore = new BugReportStore();
+  const playerReportStore = new PlayerReportStore();
 
-  const ctx: RouterContext = { sessionManager, roomManager, matchManager, bugReportStore };
+  const ctx: RouterContext = { sessionManager, roomManager, matchManager, bugReportStore, playerReportStore };
   const connectionManager = new ConnectionManager(ctx);
 
   function broadcastRoomStateIfInRoom(session: Session): void {

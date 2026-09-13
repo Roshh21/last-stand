@@ -1,6 +1,11 @@
+import type { AbilityRejectReason, AbilityTargetKind } from "../abilities.js";
 import type { BugReportInput } from "../bugReport.js";
-import type { LobbyChatMessageDTO } from "../chat.js";
+import type { ChatChannel, ChatRejectReason, LobbyChatMessageDTO, MatchChatMessageDTO } from "../chat.js";
+import type { ElementId } from "../elements.js";
+import type { KeyTransferRejectReason } from "../key.js";
 import type { MatchSnapshotDTO, MoveRejectReason } from "../match.js";
+import type { PlayerReportInput } from "../moderation.js";
+import type { PrivateMatchStateDTO } from "../roles.js";
 import type { RoomErrorCode, RoomStateDTO } from "../room.js";
 import type { SessionErrorCode, SessionInfoDTO, SessionResumedDTO } from "../session.js";
 import type { MessageEnvelope } from "./envelope.js";
@@ -46,9 +51,86 @@ export interface MoveRejectedPayload {
   targetZoneId: string;
 }
 
+export interface AbilityUsePayload {
+  targetKind: AbilityTargetKind;
+  targetId: string;
+}
+
+/** Broadcast to the whole match. Deliberately omits playerId (P19: "without naming who"). */
+export interface AbilityUsedPayload {
+  element: ElementId;
+  zoneId: string;
+}
+
+export interface AbilityRejectedPayload {
+  reason: AbilityRejectReason;
+  targetKind: AbilityTargetKind;
+  targetId: string;
+}
+
 export interface BugReportAckPayload {
   id: string;
   submittedAt: number;
+}
+
+// --- Match chat (P25-P28) ---
+
+export interface MatchChatSendPayload {
+  channel: Extract<ChatChannel, "global" | "team">;
+  text: string;
+}
+
+export interface MatchChatHistoryPayload {
+  channel: ChatChannel;
+  /** Present when this history is for one specific private/traitor thread. */
+  otherPlayerId?: string;
+  messages: MatchChatMessageDTO[];
+}
+
+export interface MatchChatRejectedPayload {
+  reason: ChatRejectReason;
+}
+
+// --- Private chat, signaling, and the traitor channel (P27, P32-P33) ---
+
+export interface PrivateChatOpenPayload {
+  targetPlayerId: string;
+}
+
+export interface PrivateChatOpenedPayload {
+  otherPlayerId: string;
+  otherNickname: string;
+}
+
+export interface PrivateChatSendPayload {
+  targetPlayerId: string;
+  text: string;
+}
+
+export interface PrivateChatSignalPayload {
+  targetPlayerId: string;
+}
+
+export interface TraitorChatSendPayload {
+  targetPlayerId: string;
+  text: string;
+}
+
+// --- The secret key (P31-P32) ---
+
+export interface KeyTransferPayload {
+  targetPlayerId: string;
+}
+
+export interface KeyTransferRejectedPayload {
+  reason: KeyTransferRejectReason;
+  targetPlayerId: string;
+}
+
+// --- Moderation (P28) ---
+
+export interface ModerationReportAckPayload {
+  id: string;
 }
 
 /**
@@ -82,6 +164,29 @@ export interface MessagePayloadMap {
   "match:snapshot": MatchSnapshotDTO;
   "match:move": MatchMovePayload;
   "match:moveRejected": MoveRejectedPayload;
+
+  "ability:use": AbilityUsePayload;
+  "ability:used": AbilityUsedPayload;
+  "ability:rejected": AbilityRejectedPayload;
+
+  "match:privateState": PrivateMatchStateDTO;
+
+  "match:chat:send": MatchChatSendPayload;
+  "match:chat:message": MatchChatMessageDTO;
+  "match:chat:history": MatchChatHistoryPayload;
+  "match:chat:rejected": MatchChatRejectedPayload;
+
+  "privateChat:open": PrivateChatOpenPayload;
+  "privateChat:opened": PrivateChatOpenedPayload;
+  "privateChat:send": PrivateChatSendPayload;
+  "privateChat:signal": PrivateChatSignalPayload;
+  "traitorChat:send": TraitorChatSendPayload;
+
+  "key:transfer": KeyTransferPayload;
+  "key:transferRejected": KeyTransferRejectedPayload;
+
+  "moderation:report": PlayerReportInput;
+  "moderation:reportAck": ModerationReportAckPayload;
 
   "bugReport:submit": BugReportInput;
   "bugReport:ack": BugReportAckPayload;

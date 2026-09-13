@@ -1,15 +1,24 @@
 import {
   createMessage,
   isMessageEnvelope,
+  type AbilityRejectedPayload,
+  type AbilityTargetKind,
+  type AbilityUsedPayload,
   type BugReportAckPayload,
   type BugReportInput,
+  type ChatRejectReason,
+  type ElementId,
   type ErrorPayload,
+  type KeyTransferRejectReason,
   type LobbyChatMessageDTO,
+  type MatchChatMessageDTO,
   type MatchSnapshotDTO,
   type MatchStartedPayload,
   type MessageEnvelope,
   type MessageType,
   type MoveRejectedPayload,
+  type PlayerReportInput,
+  type PrivateMatchStateDTO,
   type RoomErrorCode,
   type RoomStateDTO,
   type SessionErrorCode,
@@ -29,6 +38,17 @@ import { resolveWsUrl } from "./wsUrl.js";
 
 export type ConnectionStatus = "connecting" | "open" | "closed";
 
+/** A single anonymized ability-use event (P19: "without naming who"). */
+export interface AbilityLogEntry {
+  id: string;
+  element: ElementId;
+  zoneId: string;
+  receivedAt: number;
+}
+
+const ABILITY_LOG_LIMIT = 20;
+const CHAT_DISPLAY_LIMIT = 200;
+
 export interface ClientState {
   connectionStatus: ConnectionStatus;
   session: SessionInfoDTO | null;
@@ -41,6 +61,20 @@ export interface ClientState {
 
   match: MatchSnapshotDTO | null;
   lastMoveRejection: MoveRejectedPayload | null;
+  abilityLog: AbilityLogEntry[];
+  lastAbilityRejection: AbilityRejectedPayload | null;
+
+  /** P30-P33: never contains anyone else's role/key - see docs/security-audit.md. */
+  privateState: PrivateMatchStateDTO | null;
+  globalChat: MatchChatMessageDTO[];
+  teamChat: MatchChatMessageDTO[];
+  /** Keyed by the OTHER participant's playerId - one entry per open private/traitor thread. */
+  privateThreadMessages: Record<string, MatchChatMessageDTO[]>;
+  chatRejection: ChatRejectReason | null;
+  keyTransferRejection: { reason: KeyTransferRejectReason; targetPlayerId: string } | null;
+  /** Client-only, never sent to the server (P28: mute is local filtering). */
+  mutedPlayerIds: string[];
+  reportStatus: "idle" | "sending" | "sent";
 
   bugReportStatus: "idle" | "sending" | "sent" | "error";
   bugReportError: string | null;
@@ -62,6 +96,16 @@ function initialState(): ClientState {
     lobbyChat: [],
     match: null,
     lastMoveRejection: null,
+    abilityLog: [],
+    lastAbilityRejection: null,
+    privateState: null,
+    globalChat: [],
+    teamChat: [],
+    privateThreadMessages: {},
+    chatRejection: null,
+    keyTransferRejection: null,
+    mutedPlayerIds: [],
+    reportStatus: "idle",
     bugReportStatus: "idle",
     bugReportError: null,
     location: { type: "none" },
@@ -191,6 +235,36 @@ export class GameClient {
     this.dispatch(message);
   }
 
+  private appendMatchChatMessage(chatMessage: MatchChatMessageDTO): void {
+    if (chatMessage.channel === "global") {
+      this.setState({ globalChat: [...this.state.globalChat, chatMessage].slice(-CHAT_DISPLAY_LIMIT) });
+
+      return;
+    }
+
+    if (chatMessage.channel === "team") {
+      this.setState({ teamChat: [...this.state.teamChat, chatMessage].slice(-CHAT_DISPLAY_LIMIT) });
+
+      return;
+    }
+
+    // private / traitor - bucketed by the OTHER participant, present on every personalized copy.
+    const otherPlayerId = chatMessage.otherPlayerId;
+
+    if (!otherPlayerId) {
+      return;
+    }
+
+    const existing = this.state.privateThreadMessages[otherPlayerId] ?? [];
+
+    this.setState({
+      privateThreadMessages: {
+        ...this.state.privateThreadMessages,
+        [otherPlayerId]: [...existing, chatMessage].slice(-CHAT_DISPLAY_LIMIT),
+      },
+    });
+  }
+
   private dispatch(message: MessageEnvelope): void {
     switch (message.type) {
       case "pong":
@@ -266,6 +340,12 @@ export class GameClient {
           location: { type: "match", matchId: payload.matchId, roomCode: this.state.room?.code ?? null },
           room: null,
           lobbyChat: [],
+          privateState: null,
+          globalChat: [],
+          teamChat: [],
+          privateThreadMessages: {},
+          chatRejection: null,
+          keyTransferRejection: null,
         });
         break;
       }
@@ -276,6 +356,78 @@ export class GameClient {
 
       case "match:moveRejected":
         this.setState({ lastMoveRejection: message.payload as MoveRejectedPayload });
+        break;
+
+      case "ability:used": {
+        const payload = message.payload as AbilityUsedPayload;
+        const entry: AbilityLogEntry = {
+          id: crypto.randomUUID(),
+          element: payload.element,
+          zoneId: payload.zoneId,
+          receivedAt: Date.now(),
+        };
+
+        this.setState({ abilityLog: [...this.state.abilityLog, entry].slice(-ABILITY_LOG_LIMIT) });
+        break;
+      }
+
+      case "ability:rejected":
+        this.setState({ lastAbilityRejection: message.payload as AbilityRejectedPayload });
+        break;
+
+      case "match:privateState":
+        this.setState({ privateState: message.payload as PrivateMatchStateDTO });
+        break;
+
+      case "match:chat:message":
+        this.appendMatchChatMessage(message.payload as MatchChatMessageDTO);
+        break;
+
+      case "match:chat:history": {
+        const payload = message.payload as {
+          channel: string;
+          otherPlayerId?: string;
+          messages: MatchChatMessageDTO[];
+        };
+
+        if (payload.channel === "global") {
+          this.setState({ globalChat: payload.messages });
+        } else if (payload.channel === "team") {
+          this.setState({ teamChat: payload.messages });
+        } else if (payload.otherPlayerId) {
+          this.setState({
+            privateThreadMessages: {
+              ...this.state.privateThreadMessages,
+              [payload.otherPlayerId]: payload.messages,
+            },
+          });
+        }
+        break;
+      }
+
+      case "match:chat:rejected":
+        this.setState({ chatRejection: (message.payload as { reason: ChatRejectReason }).reason });
+        break;
+
+      case "privateChat:opened": {
+        const payload = message.payload as { otherPlayerId: string };
+
+        if (!this.state.privateThreadMessages[payload.otherPlayerId]) {
+          this.setState({
+            privateThreadMessages: { ...this.state.privateThreadMessages, [payload.otherPlayerId]: [] },
+          });
+        }
+        break;
+      }
+
+      case "key:transferRejected":
+        this.setState({
+          keyTransferRejection: message.payload as { reason: KeyTransferRejectReason; targetPlayerId: string },
+        });
+        break;
+
+      case "moderation:reportAck":
+        this.setState({ reportStatus: "sent" });
         break;
 
       case "bugReport:ack":
@@ -326,6 +478,72 @@ export class GameClient {
   move(targetZoneId: string): void {
     this.setState({ lastMoveRejection: null });
     this.rawSend("match:move", { targetZoneId });
+  }
+
+  // --- Elemental abilities (P16-P19) ---
+
+  useAbility(targetKind: AbilityTargetKind, targetId: string): void {
+    this.setState({ lastAbilityRejection: null });
+    this.rawSend("ability:use", { targetKind, targetId });
+  }
+
+  // --- Match chat: global, team, private, traitor (P25-P28, P32-P33) ---
+
+  sendGlobalChat(text: string): void {
+    this.setState({ chatRejection: null });
+    this.rawSend("match:chat:send", { channel: "global", text });
+  }
+
+  sendTeamChat(text: string): void {
+    this.setState({ chatRejection: null });
+    this.rawSend("match:chat:send", { channel: "team", text });
+  }
+
+  openPrivateThread(targetPlayerId: string): void {
+    this.setState({ chatRejection: null });
+    this.rawSend("privateChat:open", { targetPlayerId });
+  }
+
+  sendPrivateChat(targetPlayerId: string, text: string): void {
+    this.setState({ chatRejection: null });
+    this.rawSend("privateChat:send", { targetPlayerId, text });
+  }
+
+  sendSignal(targetPlayerId: string): void {
+    this.rawSend("privateChat:signal", { targetPlayerId });
+  }
+
+  sendTraitorChat(targetPlayerId: string, text: string): void {
+    this.setState({ chatRejection: null });
+    this.rawSend("traitorChat:send", { targetPlayerId, text });
+  }
+
+  // --- The key (P31-P32) ---
+
+  transferKey(targetPlayerId: string): void {
+    this.setState({ keyTransferRejection: null });
+    this.rawSend("key:transfer", { targetPlayerId });
+  }
+
+  // --- Moderation (P28) ---
+
+  toggleMute(playerId: string): void {
+    const muted = this.state.mutedPlayerIds.includes(playerId);
+
+    this.setState({
+      mutedPlayerIds: muted
+        ? this.state.mutedPlayerIds.filter((id) => id !== playerId)
+        : [...this.state.mutedPlayerIds, playerId],
+    });
+  }
+
+  reportPlayer(input: PlayerReportInput): void {
+    this.setState({ reportStatus: "sending" });
+    this.rawSend("moderation:report", input);
+  }
+
+  resetReportStatus(): void {
+    this.setState({ reportStatus: "idle" });
   }
 
   // --- Bug reporting (P9) ---

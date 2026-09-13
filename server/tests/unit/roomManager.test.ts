@@ -141,6 +141,10 @@ test("beginStart requires everyone connected to be ready", () => {
   assert.equal(created.ok, true);
   if (!created.ok) return;
 
+  // This test is about the ready-state mechanism, not Island's real
+  // minimum (5) - override it so two players is enough to exercise it.
+  created.value.minPlayers = 2;
+
   const guest = makeSession(sessionManager, "Guest");
   roomManager.joinRoom(guest, created.value.code);
 
@@ -194,6 +198,10 @@ test("a disconnected player is excluded from the ready-threshold count", () => {
   assert.equal(created.ok, true);
   if (!created.ok) return;
 
+  // This test is about excluding disconnected players from the count, not
+  // Island's real minimum (5) - override it to keep the test small.
+  created.value.minPlayers = 2;
+
   const guest = makeSession(sessionManager, "Guest");
   const third = makeSession(sessionManager, "Third");
   roomManager.joinRoom(guest, created.value.code);
@@ -221,10 +229,44 @@ test("beginStart still requires minPlayers connected even if everyone connected 
   roomManager.joinRoom(guest, created.value.code);
   roomManager.setReady(host, true);
 
-  // Only the host remains connected and ready - below the 2-player minimum.
+  // Only the host remains connected and ready - below any real minimum.
   guest.connected = false;
 
   const result = roomManager.beginStart(host);
 
   assert.deepEqual(result, { ok: false, code: "not_enough_ready" });
+});
+
+test("Island's real rule: a room needs its default minimum of 5 players to start, not fewer", () => {
+  const { sessionManager, roomManager } = setup();
+  const host = makeSession(sessionManager, "Host");
+  const created = roomManager.createRoom(host);
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  assert.equal(created.value.minPlayers, 5, "the default room minimum should be Island's real minimum");
+
+  const guests = ["Guest1", "Guest2", "Guest3"].map((name) => makeSession(sessionManager, name));
+
+  for (const guest of guests) {
+    roomManager.joinRoom(guest, created.value.code);
+  }
+
+  for (const session of [host, ...guests]) {
+    roomManager.setReady(session, true);
+  }
+
+  // Only 4 players (host + 3 guests) - one short of the real minimum.
+  const tooFew = roomManager.beginStart(host);
+
+  assert.deepEqual(tooFew, { ok: false, code: "not_enough_ready" });
+
+  const fifth = makeSession(sessionManager, "Guest4");
+
+  roomManager.joinRoom(fifth, created.value.code);
+  roomManager.setReady(fifth, true);
+
+  const result = roomManager.beginStart(host);
+
+  assert.equal(result.ok, true, "exactly 5 ready players should be enough to start");
 });
